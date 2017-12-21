@@ -1,0 +1,280 @@
+---
+title: "correction_supplement_fig10"
+author: "Andrea Komljenović"
+date: "6/22/2017"
+output: html_document
+---
+
+```{r pressure1}
+
+# LOAD packages
+
+library(biomaRt)
+library(GEOquery)
+library(limma)
+library(affy)
+library(affyPLM)
+
+###### FUNCTIONS
+### for preprocessing
+
+#####################################
+######### FUNCTIONS #################
+
+
+##### GENERAL FUNCTIONS FOR EVERY SPECIES
+## input: 1. path_to_cel_files - path in quotes
+#		  2. interesting_columns - vector of interested columns		
+#		  3. name_file - name of the file in quotes		
+
+rma.preprocess <- function(path_to_cel_files, colnames_species, name_file){
+	setwd(path_to_cel_files)
+	# rma processing the data
+	cat("Loading the data", "\n")
+	data.celfiles <- ReadAffy()
+	file <- list.files(pattern="CEL$")
+	cat("No. of arrays:")
+		print(length(file))
+
+	# Before RMA normalization:
+	pdf(paste(name_file, "_before_rma_boxplot.pdf", sep = ""), 10, 7)
+	boxplot(data.celfiles, col="red")
+	dev.off()
+
+
+	# justrma is the same
+	# data.eset.justrma <- justRMA(data.celfiles.celegans)
+	data.eset <- threestep(data.celfiles)
+
+	# After RMA
+	pdf(paste(name_file ,"_after_rma_boxplot.pdf", sep = ""), 10, 7)
+	boxplot(data.eset, col="blue")
+	dev.off()
+
+	expression <- exprs(data.eset)
+    print(dim(expression))
+
+	### take the columns that you need
+	mc <- match(colnames_species, colnames(expression))
+	expression.aging <- expression[, na.omit(mc)]
+
+	### quantile normalization 
+	expression.aging.norm <- normalize.quantiles(expression.aging)
+
+	cat("Dimension of expression matrix", "\n")
+	print(dim(expression.aging.norm))
+
+	rownames(expression.aging.norm) <- rownames(expression.aging)
+	colnames(expression.aging.norm) <- colnames(expression.aging)
+
+	# After RMA and quantile normalization
+	pdf(paste(name_file, "_after_rma_normalization_and_quantile_boxplot.pdf", sep = ""), 10, 7)
+	boxplot(expression.aging.norm, col="blue")
+	dev.off()
+
+	return(expression.aging.norm)
+
+}
+
+
+multiple.average <- function(list, expression.tissue){
+	ch.mus <- lapply(list, function(x) length(x) > 1)
+	# indexing it
+	tf.mus <- which(matrix(unlist(ch.mus), ncol = 1, byrow = TRUE) == TRUE)
+	probe.mus <- list[tf.mus]
+	hg.mus <- lapply(probe.mus, function(y) expression.tissue[y, ])
+	# average them
+	av.val.mus <- lapply(hg.mus, function(x) apply(x,2,mean))
+	return(do.call(rbind, av.val.mus))
+}
+
+
+# Unique probes to gene
+unique.probes <- function(list, expression.tissue){
+	# gene that have exactly one more
+	ch.no.mus <- lapply(list, function(x) length(x) == 1)
+	tf.no.mus <- which(matrix(unlist(ch.no.mus), ncol = 1, byrow = TRUE) == TRUE)
+	probes.one.mus <- list[tf.no.mus]
+	hg.one.mus <- lapply(probes.one.mus, function(y) expression.tissue[y, ])
+	return(do.call(rbind, hg.one.mus)) 
+
+}
+
+
+# input: expression matrix - n samples, p genes
+annotation.mus <- function(expression.tissue){
+	cat("Calling mart... \n")
+	ensembl <- useEnsembl(biomart="ensembl", dataset="mmusculus_gene_ensembl", version = 85)
+	
+
+	cat("Getting Ensembl annotation... \n")
+	annotation<- getBM(attributes = c("affy_mouse430_2","external_gene_name","ensembl_gene_id", "entrezgene",
+		 "chromosome_name", "start_position", "end_position", "description", "gene_biotype"), filters=c("affy_mouse430_2"),
+          values = rownames(expression.tissue), mart = ensembl, uniqueRows = TRUE)
+
+	cat("Taking the protein-coding genes... \n")
+	anno <- annotation[which(annotation$gene_biotype == "protein_coding"),]
+	dim(anno)
+
+	cat("check for duplications... \n")
+	# renaming so its easier to work with
+	mis.anno <- anno
+	mis.anno <- mis.anno[-which(duplicated(mis.anno$affy_mouse430_2) == "TRUE"),]
+	dim(mis.anno)
+	# dealing with the probesets
+	cat("split the according ensembl_gene_id... \n")
+	ma.mus <- split(mis.anno$affy_mouse430_2, mis.anno$ensembl_gene_id) 
+
+	cat("average the probes... \n")
+	genes.mus.averaged <- multiple.average(ma.mus, expression.tissue)
+	cat("find unique probes... \n")
+	genes.one.probe <- unique.probes(ma.mus, expression.tissue)
+	
+	final.expr <- rbind(genes.mus.averaged, genes.one.probe)
+	
+
+	mo2 <- match(rownames(final.expr), mis.anno$ensembl_gene_id )
+	annotation.mus <-  mis.anno[na.omit(mo2), ]
+	cat("Done... \n")
+
+	return(list(annotation.mus, final.expr))
+
+}
+
+
+download.GEO <- function(GSE.number){
+  path <- "~/Results_Project1_Aging_Bayesian/final_paper_things/data/"
+  file.path.gse <- getGEOSuppFiles(GSE.number, makeDirectory = TRUE, baseDir = path)
+  gset <- getGEO(GSE.number, GSEMatrix = TRUE)
+  if (length(gset) > 1) idx <- grep("GPL6947", attr(gset, "names")) else idx <- 1
+  gset <- gset[[idx]]
+  # phenotype data to select the samples
+  pheno <- pData(gset)
+  return(pheno)
+}
+
+```
+
+Analysis:
+
+```{r pressure2}
+
+# change the paths here according to your path.
+
+setwd("~/Results_Project1_Aging_Bayesian/final_paper_things/data/")
+# path <- "~/Results_Project1_Aging_Bayesian/final_paper_things/data/"
+
+# Fetching the dataset 3 #3 tissues + DR dataset
+pheno3.mouse <- download.GEO("GSE11291")
+## unzipping the files
+setwd("~/Results_Project1_Aging_Bayesian/final_paper_things/data/GSE11291/")
+system("tar -xvf ~/Results_Project1_Aging_Bayesian/final_paper_things/data/GSE11291/GSE11291_RAW.tar")
+system( "gunzip *CEL.gz")
+# taking all the samples
+files <- list.files(path = ".")
+# here goes all 60 arrays
+preprocessed.data.mouse3 <- rma.preprocess("~/Results_Project1_Aging_Bayesian/final_paper_things/data/GSE11291/", files, "Mouse GSE11291")
+```
+
+With correct annotation:
+
+```{r pressure3}
+# GSE 11291 dietary restriction part
+anno3 <- pheno3.mouse
+# for dr and healthy - control
+anno3.dr <- anno3[which(as.character(anno3$description) %in% c("Gene expression of old calorie-restricted mice", "Gene expression of old control mice")),]
+# separate according to the tissue
+anno3.dr <- split(anno3.dr, gsub("\\,.*", "", anno3.dr$source_name_ch1, perl = TRUE))
+
+# show the annotation - there are 3 tissues in the dataset. Showing only neocortex.
+anno3.dr$neocortex
+
+## pulling the annotation
+expr.annot3.dr <- lapply(anno3.dr, function(x)
+  preprocessed.data.mouse3[,match(as.character(x$geo_accession), do.call(c, lapply(strsplit(colnames(preprocessed.data.mouse3), "\\.CEL"), function(x) x[1])))])
+# here was a mistake!!!!!!!!!! It is changed now.
+expr.annot3.dr <- lapply(expr.annot3.dr, function(x) {colnames(x) <- c(rep("H", 5), rep("CR", 5)); x})
+# this is list of lists - having expression matrix and annotation matrix as objects per tissue
+annotated.exprs.mouse.muscle3.dr <- lapply(expr.annot3.dr, function(x) annotation.mus(x)) 
+```
+
+```{r pressure4}
+candidate.genes <- c("SULT1A1", "CHRNA5", "RBM6")
+# SULT1A1 - mouse: 1-to-many, fly: 1-to-many: worm: no orthologs
+#  - Sulfotransferase Family 1A Member 1
+#  - METABOLISM
+#  KO: Mice: abnormal blood homeostasis, but not related to aging. Fly: not found
+
+# CHRNA5 - mouse: 1-to-1, fly: no orthologs: worm: no orthologs
+#  - cholinergic receptor nicotinic alpha 5 subunit
+#  - Extracellular ligand-gated ion channel activity
+#  KO: Mice: CHRNA7 was related to aging, but not CHRNA5. Fly: not found
+
+# RBM6 - mouse: 1-to-1, fly: many-to-many: worm: 1-to-many - What are the names of those in other species
+# - RNA Binding Motif Protein 6
+# - RNA BINDING
+# KO:no defined phenotypic links.
+
+
+# The names of SULT1A1 in other species:
+# -   mouse: Sult1a1 - ENSMUSG00000030711
+# -   fly: St2 - FBgn0037665
+# -   worm: this gene doesn't exist in worm
+
+# The names of CHRNA5 in other species:
+# -   mouse: Chrna5 - ENSMUSG00000035594
+# -   fly: nAChRβ2 - FBgn0004118
+# -   worm: unc-63 - WBGene00006797
+
+
+# The names of  RBM6 in other species:
+# -   mouse: Rbm6 - ENSMUSG00000032582
+# -   fly: CG4887, CG4896 - FBgn0031318
+# -   worm: T08B2.5 - WBGene00020346
+```
+
+
+
+```{r pressure5}
+library(RColorBrewer)
+library(ggplot2)
+library(reshape2)
+library(biomaRt)
+
+# for results
+setwd("/Users/akomljen/Results_Project1_Aging_Bayesian/collaboration_Zoltan_Aaron/")
+
+
+# take from the matrix
+mouse.genes <- c("ENSMUSG00000030711", "ENSMUSG00000035594", "ENSMUSG00000032582")
+mouse.dr.exp <- annotated.exprs.mouse.muscle3.dr$neocortex[[2]]
+
+head(mouse.dr.exp)
+# nrows and ncols
+dim(mouse.dr.exp)
+```
+
+```{r pressure6}
+library(reshape2)
+colnames(mouse.dr.exp) <- c(rep("Control", 5), rep("Caloric restriction", 5))
+chosen.mouse <- mouse.dr.exp[mouse.genes,]
+rownames(chosen.mouse) <- c("Sult1a1 (ENSMUSG00000030711)", "Chrna5 (ENSMUSG00000035594)", "Rbm6 (ENSMUSG00000032582)")
+mouse.melted <- melt(as.matrix(chosen.mouse))
+
+library(ggplot2)
+# pdf("results_3genes_mouse_boxplots_5Dec_21Jun.pdf",8,6)
+gw <- ggplot(data = mouse.melted, aes(x = Var2, y = value, fill = Var2)) +
+  theme_bw() +
+  geom_boxplot() + ggtitle("Mouse (Neocortex, GSE11291)") +
+  facet_grid( ~ Var1) + xlab("") + ylab("Expression values (log2(intensities))")  + scale_fill_brewer(palette = "Paired") +
+  theme(legend.position = "none", axis.text.x = element_text(angle = 45, hjust = 1))
+plot(gw)
+# dev.off()
+
+```
+
+
+```{r pressure7}
+sessionInfo()
+```
+

@@ -1,0 +1,462 @@
+---
+title: "Collaboration with Aaron and Zoltan, update 3; Sep 2016"
+author: "Andrea Komljenović"
+date: "September 28, 2016"
+output: html_document
+---
+
+Load the packages
+
+```{r load packages}
+library(RColorBrewer)
+library(ggplot2)
+library(reshape2)
+library(biomaRt)
+``` 
+
+
+##### PART 1. Check conservation in other species and the gene expression profile. Aging.
+
+Note: Knockout experiments where searched if they were related to aging/lifespan, otherwise not reported. Datasets are microarrays if not indicated differently.The reason for dietary restriction part came due to reverse effect on majority of expression levels compared to aging, which we see in my results. If the gene has increase expression levels in old age, we would expect to have low levels of expression in dietary(caloric) treatments.#####
+
+##### SULT1A1 - *mouse*: 1-to-many, *fly*: 1-to-many: *worm*: no orthologs
+      - Sulfotransferase Family 1A Member 1
+      - METABOLISM
+      
+      KO: Mice: abnormal blood homeostasis, but not related to aging. Fly: not found
+   
+##### CHRNA5 - *mouse*: 1-to-1, *fly*: many-to-many: *worm*: many-to-many
+      - cholinergic receptor nicotinic alpha 5 subunit 
+      - Extracellular ligand-gated ion channel activity 
+      
+      KO: Mice: CHRNA7 was related to aging, but not CHRNA5. Fly: not found
+      
+##### RP11.650L12.2 - *mouse*, *worm* and *fly*: no orthologs
+    - an RNA Gene, and is affiliated with the antisense RNA class, so not protein coding gene
+
+##### EIF3C - *mouse*: 1-to-many, *fly*: 1-to-many: *worm*: 1-to-many
+    - Eukaryotic Translation Initiation Factor 3 Subunit C
+    - GENE EXPRESSION
+    
+    KO: Knockout of this gene in mice as a decreased survivor rate   <http://www.informatics.jax.org/searches/Phat.cgi?id=MP:0008770>. Fly: not found.
+
+##### APOE - *mouse*: 1-to-1, *fly*: no ortholgs: *worm*: no orthologs
+      - Alzheimers Disease Pathway and Glucose / Energy Metabolism
+      - Not sure I need to introduce this well-known gene :)
+      
+      KO: mice die at 14 months with females dying slightly earlier than males - premature death.<http://www.informatics.jax.org/diseasePortal/genoCluster/view/5966>
+
+
+##### CEACAM19 - *mouse*: 1-to-1, *fly* and *worm*: no orthologs
+    - carcinoembryonic antigen-related cell adhesion molecule 19
+    - Not much is known about this gene 
+    KO: There is knockout in this gene but it doesn't say which phenotype. <http://www.informatics.jax.org/allele/MGI:5007057>
+
+##### RBM6 - *mouse*: 1-to-1, *fly*: many-to-many: *worm*: 1-to-many
+    - RNA Binding Motif Protein 6
+    - RNA BINDING
+    KO:no defined phenotypic links.
+
+##### PSMA4 - *mouse*: 1-to-1, *fly*: 1-to-many: *worm*: no orthologs
+    - Proteasome Subunit Alpha 4
+    - ENDOPEPTIDASE ACTIVITY
+    
+    KO:no defined phenotypic links.
+
+##### RNF123 - *mouse*: 1-to-1, *fly*: 1-to-1: *worm*: no orthologs
+    -  Antigen processing- Ubiquitination and Proteasome degradation and Immune System
+    -  C-terminal RING finger domain
+    
+     KO:no defined phenotypic links
+
+##### GRK4 - *mouse*: 1-to-many, *fly*: 1-to-many: *worm*: 1-to-many
+      - G Protein-Coupled Receptor Kinase 4
+      - TRANSFERASE ACTIVITY
+      
+      KO:no defined phenotypic links
+
+
+```{r ortho gathering}
+candidate.genes <- c("SULT1A1", "CHRNA5", "RP11.650L12.2", "EIF3C", "APOE", "CEACAM19", "RBM6", "PSMA4", "RNF123", "GRK4")
+
+ensembl <- useEnsembl(biomart="ensembl", dataset="hsapiens_gene_ensembl", version = 85)
+a <- getBM(attributes=c('ensembl_gene_id','gene_biotype','external_gene_name','chromosome_name','start_position','end_position'), 
+           values = candidate.genes, filters = c("external_gene_name"), mart = ensembl, uniqueRows = TRUE)
+
+
+orthology.to.human <- function(mart.human){
+  orth.mouse <- getBM(attributes = c("ensembl_gene_id", "external_gene_name", "mmusculus_homolog_ensembl_gene", 
+                                     "mmusculus_homolog_orthology_type"), filters = "with_homolog_mmus", values= TRUE,
+                      mart = mart.human, bmHeader = FALSE, uniqueRows = TRUE)
+  orth.drosophila <- getBM(attributes = c("ensembl_gene_id", "external_gene_name", "dmelanogaster_homolog_ensembl_gene", 
+                                          "dmelanogaster_homolog_orthology_type"), filters = "with_homolog_dmel", values= TRUE,
+                           mart = mart.human, bmHeader = FALSE, uniqueRows = TRUE)
+  orth.celegans <- getBM(attributes = c("ensembl_gene_id", "external_gene_name", "celegans_homolog_ensembl_gene", 
+                                        "celegans_homolog_orthology_type"), filters = "with_homolog_cele", values= TRUE,
+                         mart = mart.human, bmHeader = FALSE, uniqueRows = TRUE)
+  return(list(ToMouse = orth.mouse, ToDmel = orth.drosophila, ToCele = orth.celegans))
+}
+
+
+## all combination of orthologs
+orthologs <- orthology.to.human(ensembl)
+
+ortho.mfw <- lapply(orthologs, function(x) x[na.omit(match(a$ensembl_gene_id, x$ensembl_gene_id)),]) 
+print(ortho.mfw)
+```    
+
+Due to many to many relationships, check all of them in model organisms. 
+
+```{r mouse one2many}
+mouse.genes <- orthologs$ToMouse[orthologs$ToMouse$external_gene_name %in% candidate.genes,]
+```
+
+
+```{r fly one2many}
+fly.genes <- orthologs$ToDmel[orthologs$ToDmel$external_gene_name %in% candidate.genes,]
+```
+
+
+```{r worm one2many}
+worm.genes <- orthologs$ToCele[orthologs$ToCele$external_gene_name %in% candidate.genes,]
+```
+
+
+In this mouse dataset, CEACAM19 gene is not found. 
+
+```{r m musculus aging} 
+expres.mm.muscle1 <- readRDS("~/Results_Project1/final_paper_things/data/02.expression_matrices/expression_matrix_GSE52550_mouse.rds")
+expression.muscle <- expres.mm.muscle1[[2]]
+mkm <- match(mouse.genes$mmusculus_homolog_ensembl_gene, rownames(expression.muscle))
+expression.muscle.aging <- expression.muscle[na.omit(mkm), ]
+rownames(expression.muscle.aging) <- mouse.genes[match(rownames(expression.muscle.aging),
+                                                       mouse.genes$mmusculus_homolog_ensembl_gene),]$external_gene_name
+formuscle.mouse <- melt(expression.muscle.aging, id = "x")
+```
+
+```{r m musculus plotting, echo=FALSE} 
+# pdf("~/Results_Project1/collaboration/results/mouse_aging_tissues_GSE52550_updateSep2016.pdf", 10,7)
+gmag <- ggplot(data = formuscle.mouse, aes(x = Var2, y = value, fill = Var2)) + 
+  theme_bw() +
+  geom_boxplot() + ggtitle("Mouse GSE52550; muscle") + 
+  facet_grid( ~ Var1) + xlab("") + ylab("Expression value")  + scale_fill_brewer(palette = "Paired") +
+  theme(legend.position = "none")
+plot(gmag) 
+# dev.off()
+```
+
+
+```{r m musculus aging 2} 
+expres.mm.3tissues <- readRDS("~/Results_Project1/final_paper_things/data/02.expression_matrices/expression_matrix_GSE11291_mouse.rds")
+
+expression.3tissues <- lapply(expres.mm.3tissues, function(x) x[[2]])
+subset.genes.3tissues <- lapply(expression.3tissues, function(x) {
+  mk <- match(mouse.genes$mmusculus_homolog_ensembl_gene, rownames(x))
+  x <- x[na.omit(mk), ]
+  rownames(x) <- mouse.genes[match(rownames(x),
+                                                       mouse.genes$mmusculus_homolog_ensembl_gene),]$external_gene_name
+  return(x)})
+```
+
+
+```{r m musculus plotting 2, echo=FALSE} 
+# pdf("~/Results_Project1/collaboration/results/mouse_aging_tissues_GSE11291_updateSep2016.pdf", 10,7)
+for3tissues <- lapply(subset.genes.3tissues, function(x) melt(x, id = "x")) 
+tissues3 <- c( "gastrocnemius", "heart", "neocortex" )
+for(i in 1:length(for3tissues)){
+  gmag2 <- ggplot(data = for3tissues[[i]], aes(x = Var2, y = value, fill = Var2)) + 
+    theme_bw() +
+    geom_boxplot() + ggtitle(paste("Mouse GSE11291", tissues3[i])) +
+    facet_grid(~ Var1) + xlab("") + ylab("Expression value") + scale_fill_brewer(palette = "Paired") +
+    theme(legend.position = "none")
+  plot(gmag2)
+}  
+# dev.off()
+```
+
+
+```{r drosophila aging 3} 
+expres.dmel.wholebody2 <- readRDS("~/Results_Project1/final_paper_things/data/02.expression_matrices/expression_matrix_GSE26726_fly_aging.rds")
+fly.expr.female.aging <- expres.dmel.wholebody2[[2]]
+fly.expr.female.aging <- fly.expr.female.aging[,c(4,5,6,1,2,3)]  # reverse old and young
+mkf2 <- match(fly.genes$dmelanogaster_homolog_ensembl_gene, rownames(fly.expr.female.aging))
+fly.expr.female.aging<- fly.expr.female.aging[na.omit(mkf2), ]
+rownames(fly.expr.female.aging) <- fly.genes[match(rownames(fly.expr.female.aging),
+                                                       fly.genes$dmelanogaster_homolog_ensembl_gene),]$external_gene_name
+fly.melted.aging.w <- melt(fly.expr.female.aging, id = "x")
+```
+
+```{r drosophila aging 3 plotting} 
+gfag <- ggplot(data = fly.melted.aging.w, aes(x = Var2, y = value, fill = Var2)) + 
+  theme_bw() +
+  geom_boxplot() + ggtitle("Fly GSE26726; Whole body") + 
+  facet_grid( ~ Var1) + xlab("") + ylab("Expression value")  + scale_fill_brewer(palette = "Paired") +
+  theme(legend.position = "none")
+plot(gfag)
+```
+
+Maybe add the fly RNAseq?
+
+```{r drosophila aging rnaseq plotting, message=FALSE, warnings= FALSE} 
+source("/Users/akomljen/Results_Project1/RNAseq_analysis_March2016.R")
+
+directory.fly.male <- '/Users/akomljen/Results_Project1/dmelano/fly_rnaseq_wholebody_SRP26086/'
+files.rnaseq.fly.male <- dir(path = directory.fly.male, pattern=".tsv$")
+gene.counts.fly.male <- gene.summaries(directory.fly.male, files.rnaseq.fly.male, "dmelanogaster_gene_ensembl", "lengthScaledTPM")
+
+colnames(gene.counts.fly.male$counts) <- c(rep("young", 3), rep("middle", 3),rep("old", 2))
+```
+
+```{r dmelano rnaseq rpkm} 
+## small function for rpkm calc
+rpkm.calculation <- function(counts, lengths) {
+  rate <- counts / lengths 
+  return(rate / sum(counts) * 1e9)
+}
+```
+
+```{r dmelano rnaseq getting the gene lengths}
+fly.ensembl <- useMart(biomart="ensembl", dataset="dmelanogaster_gene_ensembl")
+annot <- getBM(attributes = c("ensembl_gene_id","external_gene_name", "cds_length", "description", "gene_biotype"), filters=c("ensembl_gene_id"),
+          values = rownames( gene.counts.fly.male$counts), mart = fly.ensembl, uniqueRows = TRUE)
+annot <- annot[complete.cases(annot), ]
+gene.length.fly <- aggregate(annot$cds_length, by=list(annot$ensembl_gene_id), max)
+```
+
+```{r dmelano rnaseq rpkm calcs}
+# taken CDS lengths
+gene.counts.fly.male$counts <- as.data.frame(gene.counts.fly.male$counts)
+genes.fly.rnaseq <- gene.counts.fly.male$counts[gene.length.fly$Group.1,]
+rks <- rpkm.calculation(genes.fly.rnaseq, gene.length.fly$x) 
+rks <- log2(rks + 1)
+rk.set <- rks[fly.genes$dmelanogaster_homolog_ensembl_gene,]
+nams <- fly.genes[match(rownames(rk.set),fly.genes$dmelanogaster_homolog_ensembl_gene),]$external_gene_name
+rownames(rk.set) <-  make.names(nams, unique=TRUE)
+# orth.dmelTohomo <- getBM(attributes = c("ensembl_gene_id", "external_gene_name", "hsapiens_homolog_ensembl_gene", "hsapiens_homolog_orthology_type"), filters = "with_homolog_hsap", values= TRUE, mart = fly.ensembl, bmHeader = FALSE, uniqueRows = TRUE)
+# orth.dmelTohomo[orth.dmelTohomo$ensembl_gene_id %in% fly.genes$dmelanogaster_homolog_ensembl_gene,]
+fly.gene.set <- melt(as.matrix(rk.set), id = "x")
+```
+
+```{r dmelano rnaseq plot gene, echo = FALSE}
+gf.rnaseq <- ggplot(data = fly.gene.set, aes(x = Var2, y = value, fill = Var2)) + 
+  theme_bw() +
+  geom_boxplot() + ggtitle("Fly RNAseq GSE47999; whole body, male") + 
+  facet_grid( ~ Var1) + xlab("") + ylab("Expression value (log2(RPKM + 1))")  + scale_fill_brewer(palette = "Paired") +
+  theme(legend.position = "none",  axis.text.x = element_text(angle = 90, hjust = 1))
+plot(gf.rnaseq) 
+```
+
+
+
+
+```{r celegans three genes,  fig.width = 10, fig.height = 10, message=FALSE, warning=FALSE}
+# annotation
+ensembl.celegans <- useEnsembl(biomart="ensembl", dataset="celegans_gene_ensembl", version = 85)
+orth.celeTohomo <- getBM(attributes = c("ensembl_gene_id", "external_gene_name", "hsapiens_homolog_ensembl_gene", "hsapiens_homolog_orthology_type"), filters = "with_homolog_hsap", values= TRUE, mart = ensembl.celegans, bmHeader = FALSE, uniqueRows = TRUE)
+### 
+worm.gene.names <- orth.celeTohomo[orth.celeTohomo$ensembl_gene_id %in% worm.genes$celegans_homolog_ensembl_gene,]
+worm.gene.names <- sapply(split(worm.gene.names$external_gene_name, worm.gene.names$ensembl_gene_id), "[", 1)
+
+
+require(gdata)
+celegans <- read.csv("/Users/akomljen/Documents/GSE46051_ce_22samples_DMSO_Rotenone_counts_and_RPKM.csv", header = TRUE)
+# only on the control plates
+
+control.samples <- c("JA1", "JA2", "JA3", "JA10", "JA11", "JA12", "JA19", "JA20", "JA21", "JA28", "JA29") # chosen control samples
+control.samples.lab <- c(rep("1day", 3), rep("5day", 3), rep("10day", 3), rep("20day", 2))
+
+celegans <- celegans[!duplicated(celegans$genename), ]
+rownames(celegans) <- celegans$genename
+cele.cand <- celegans[na.omit(match(worm.gene.names, rownames(celegans))),]
+cele.cand.controls <- cele.cand[,control.samples]
+colnames(cele.cand.controls) <- control.samples.lab
+
+# ortho.mfw$ToCele[na.omit(match(names(worm.gene.names), ortho.mfw$ToCele$celegans_homolog_ensembl_gene)),] 
+
+rownames(cele.cand.controls) <- c("CHRNA5 (acr-6)", "CHRNA5 (acr-8)", "CHRNA5 (acr-12)", "EIF3C (eif-3.C)", "GRK4 (grk-1)", "CHRNA5 (lev-8)", "PSMA4 (pas-3)", "CHRNA5 (unc-38)", "CHRNA5 (unc-63)","RBM6 (T08B2.5)")
+
+worm.melted <- melt(as.matrix(log2(cele.cand.controls + 1)))
+gwag <- ggplot(data = worm.melted, aes(x = Var2, y = value, fill = Var2)) + 
+  theme_bw() +
+  geom_boxplot() + ggtitle("Worm RNASeq; 1,5,10,20 days old, whole body") + 
+  facet_grid( ~ Var1) + xlab("") + ylab("log2(RPKM + 1)")  + scale_fill_brewer(palette = "Paired") +
+  theme(legend.position = "none", axis.text.x = element_text(angle = 90, hjust = 1))
+plot(gwag)
+```
+
+
+
+######## FINAL PDF for aging.
+
+```{r pdf aging}
+pdf("~/Results_Project1/collaboration_Zoltan_Aaron/results/results_aging_update3_Sep2016.pdf", 10, 10)
+
+# mouse 1
+gmag <- ggplot(data = formuscle.mouse, aes(x = Var2, y = value, fill = Var2)) + 
+  theme_bw() +
+  geom_boxplot() + ggtitle("Mouse GSE52550; muscle") + 
+  facet_grid( ~ Var1) + xlab("") + ylab("Expression value")  + scale_fill_brewer(palette = "Paired") +
+  theme(legend.position = "none")
+plot(gmag) 
+
+# mouse 2
+for(i in 1:length(for3tissues)){
+  gmag2 <- ggplot(data = for3tissues[[i]], aes(x = Var2, y = value, fill = Var2)) + 
+    theme_bw() +
+    geom_boxplot() + ggtitle(paste("Mouse GSE11291", tissues3[i])) +
+    facet_grid(~ Var1) + xlab("") + ylab("Expression value") + scale_fill_brewer(palette = "Paired") +
+    theme(legend.position = "none")
+  plot(gmag2)
+} 
+
+# fly 1
+gfag <- ggplot(data = fly.melted.aging.w, aes(x = Var2, y = value, fill = Var2)) + 
+  theme_bw() +
+  geom_boxplot() + ggtitle("Fly GSE26726; Whole body") + 
+  facet_grid( ~ Var1) + xlab("") + ylab("Expression value")  + scale_fill_brewer(palette = "Paired") +
+  theme(legend.position = "none")
+plot(gfag)
+
+# fly rnaseq
+gf.rnaseq <- ggplot(data = fly.gene.set, aes(x = Var2, y = value, fill = Var2)) + 
+  theme_bw() +
+  geom_boxplot() + ggtitle("Fly RNAseq GSE47999; whole body, male") + 
+  facet_grid( ~ Var1) + xlab("") + ylab("Expression value (log2(RPKM + 1))")  + scale_fill_brewer(palette = "Paired") +
+  theme(legend.position = "none",  axis.text.x = element_text(angle = 90, hjust = 1))
+plot(gf.rnaseq) 
+
+# worm
+gwag <- ggplot(data = worm.melted, aes(x = Var2, y = value, fill = Var2)) + 
+  theme_bw() +
+  geom_boxplot() + ggtitle("Worm RNASeq; 1,5,10,20 days old, whole body") + 
+  facet_grid( ~ Var1) + xlab("") + ylab("log2(RPKM + 1)")  + scale_fill_brewer(palette = "Paired") +
+  theme(legend.position = "none", axis.text.x = element_text(angle = 90, hjust = 1))
+plot(gwag)
+
+dev.off()
+```
+
+
+
+##### PART 2. DIETARY RESTRICTION.
+
+```{r m musculus dietary restriction}
+mouse.dr <- readRDS("~/Results_Project1/final_paper_things/data/02.expression_matrices/expression_matrix_GSE11291_mouse_dr.rds")
+mouse.tissues <- lapply(mouse.dr, function(x)  x[[2]])
+
+subset.genes.dr <- lapply(mouse.tissues, function(x) {
+  mk <- match(mouse.genes$mmusculus_homolog_ensembl_gene, rownames(x))
+  x <- x[na.omit(mk), ]
+  rownames(x) <- mouse.genes[match(rownames(x),
+                                                       mouse.genes$mmusculus_homolog_ensembl_gene),]$external_gene_name
+  return(x)})
+```
+
+
+```{r m musculus plotting 1 dr, echo=FALSE} 
+melted.dr <- lapply(subset.genes.dr, function(x) melt(x, id = "x"))
+
+tissues.dr <- c("gastrocnemius", "heart", "neocortex")
+# pdf("~/Results_Project1/collaboration/results/mouse_dr_tissues_GSE11291.pdf", 10,7)
+for(i in 1:length(melted.dr)){
+  gm <- ggplot(data = melted.dr[[i]], aes(x = Var2, y = value, fill = Var2)) + 
+    theme_bw() +
+    geom_boxplot() + ggtitle(paste("Mouse GSE11291", tissues.dr[i])) +
+    facet_grid(~ Var1) + xlab("") + ylab("Expression value") + scale_fill_brewer(palette = "Paired") +
+    theme(legend.position = "none")
+  plot(gm)
+  
+}
+#dev.off()
+```
+
+
+```{r d melanogaster dietary restriction}
+# D. melanogaster
+fly.dr <- readRDS("~/Results_Project1/final_paper_things/data/02.expression_matrices/expression_matrix_GSE26726_fly_dr.rds")
+fly.expr.dr <- fly.dr$'40 days'[[2]]
+
+mkf <- match(fly.genes$dmelanogaster_homolog_ensembl_gene, rownames(fly.expr.dr))
+fly.expr.dr <- fly.expr.dr[na.omit(mkf), , drop = FALSE]
+rownames(fly.expr.dr) <- fly.genes[match(rownames(fly.expr.dr),
+                                                       fly.genes$dmelanogaster_homolog_ensembl_gene),]$external_gene_name
+colnames(fly.expr.dr) <- c(rep("CR",3), rep("H",3)) # name the columns
+```
+
+
+```{r d melanogaster plotting 1 dr, echo=FALSE} 
+fly.melted.dr <- melt(fly.expr.dr, id = "x")
+# pdf("~/Results_Project1/collaboration/results/fly_dr_GSE26726.pdf", 10,7)
+gf <- ggplot(data = fly.melted.dr, aes(x = Var2, y = value, fill = Var2)) + 
+  theme_bw() +
+  geom_boxplot() + ggtitle("Fly GSE26726; 40 days old, whole body") + 
+  facet_grid( ~ Var1) + xlab("") + ylab("Expression value")  + scale_fill_brewer(palette = "Paired") +
+  theme(legend.position = "none")
+plot(gf)
+# dev.off()
+```
+
+```{r c elegans dietary restriction}
+# C. elegans
+worm.dr <- readRDS("~/Results_Project1/final_paper_things/data/02.expression_matrices/expression_matrix_GSE27677_worm_dr.rds")
+worm.dr.exp <- worm.dr[[2]]
+
+# candidate genes in celegans
+
+
+mkw <- match(names(worm.gene.names), rownames(worm.dr.exp))
+worm.expr.dr <- worm.dr.exp[na.omit(mkw), ]
+rownames(worm.expr.dr) <-  c("CHRNA5 (acr-6)", "CHRNA5 (acr-8)", "CHRNA5 (acr-12)", "EIF3C (eif-3.C)", "GRK4 (grk-1)", "CHRNA5 (lev-8)", "PSMA4 (pas-3)", "CHRNA5 (unc-38)", "CHRNA5 (unc-63)","RBM6 (T08B2.5)")
+``` 
+
+ 
+```{r c elegans plotting 1 dr, echo=FALSE, fig.width = 10, fig.height = 10} 
+worm.expr.dr <- worm.expr.dr[,c(4,5,6,1,2,3)] # reorder columns to be comparable with other species
+worm.melted.dr <- melt(worm.expr.dr, id = "x")
+
+# pdf("~/Results_Project1/collaboration/results/worm_dr_GSE27677.pdf", 10,7)
+gw <- ggplot(data = worm.melted.dr, aes(x = Var2, y = value, fill = Var2)) + 
+  theme_bw() +
+  geom_boxplot() + ggtitle("Worm GSE27677; 4 days old, whole body") + 
+  facet_grid( ~ Var1) + xlab("") + ylab("Expression value")  + scale_fill_brewer(palette = "Paired") +
+  theme(legend.position = "none")
+plot(gw)
+# dev.off()
+```
+
+######## FINAL PDF of DR
+
+```{r pdf dr}
+pdf("~/Results_Project1/collaboration_Zoltan_Aaron/results/results_dietary_restriction_update3_Sep2016.pdf", 10, 10)
+
+# mouse
+for(i in 1:length(melted.dr)){
+  gm <- ggplot(data = melted.dr[[i]], aes(x = Var2, y = value, fill = Var2)) + 
+    theme_bw() +
+    geom_boxplot() + ggtitle(paste("Mouse GSE11291", tissues.dr[i])) +
+    facet_grid(~ Var1) + xlab("") + ylab("Expression value") + scale_fill_brewer(palette = "Paired") +
+    theme(legend.position = "none")
+  plot(gm)
+  
+}
+
+# fly
+gf <- ggplot(data = fly.melted.dr, aes(x = Var2, y = value, fill = Var2)) + 
+  theme_bw() +
+  geom_boxplot() + ggtitle("Fly GSE26726; 40 days old, whole body") + 
+  facet_grid( ~ Var1) + xlab("") + ylab("Expression value")  + scale_fill_brewer(palette = "Paired") +
+  theme(legend.position = "none")
+plot(gf)
+
+# worm
+gw <- ggplot(data = worm.melted.dr, aes(x = Var2, y = value, fill = Var2)) + 
+  theme_bw() +
+  geom_boxplot() + ggtitle("Worm GSE27677; 4 days old, whole body") + 
+  facet_grid( ~ Var1) + xlab("") + ylab("Expression value")  + scale_fill_brewer(palette = "Paired") +
+  theme(legend.position = "none")
+plot(gw)
+
+dev.off()
+```
+
+
