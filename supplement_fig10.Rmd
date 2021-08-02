@@ -5,7 +5,7 @@ date: "6/22/2017"
 output: html_document
 ---
 
-```{r pressure1}
+```{r loading packages}
 
 # LOAD packages
 
@@ -157,7 +157,7 @@ download.GEO <- function(GSE.number){
 
 Analysis:
 
-```{r pressure2}
+```{r define files}
 
 # change the paths here according to your path.
 
@@ -178,7 +178,7 @@ preprocessed.data.mouse3 <- rma.preprocess("~/Results_Project1_Aging_Bayesian/fi
 
 With correct annotation:
 
-```{r pressure3}
+```{r load data}
 # GSE 11291 dietary restriction part
 anno3 <- pheno3.mouse
 # for dr and healthy - control
@@ -192,13 +192,13 @@ anno3.dr$neocortex
 ## pulling the annotation
 expr.annot3.dr <- lapply(anno3.dr, function(x)
   preprocessed.data.mouse3[,match(as.character(x$geo_accession), do.call(c, lapply(strsplit(colnames(preprocessed.data.mouse3), "\\.CEL"), function(x) x[1])))])
-# here was a mistake!!!!!!!!!! It is changed now.
+
 expr.annot3.dr <- lapply(expr.annot3.dr, function(x) {colnames(x) <- c(rep("H", 5), rep("CR", 5)); x})
 # this is list of lists - having expression matrix and annotation matrix as objects per tissue
 annotated.exprs.mouse.muscle3.dr <- lapply(expr.annot3.dr, function(x) annotation.mus(x)) 
 ```
 
-```{r pressure4}
+```{r genes}
 candidate.genes <- c("SULT1A1", "CHRNA5", "RBM6")
 # SULT1A1 - mouse: 1-to-many, fly: 1-to-many: worm: no orthologs
 #  - Sulfotransferase Family 1A Member 1
@@ -235,7 +235,7 @@ candidate.genes <- c("SULT1A1", "CHRNA5", "RBM6")
 
 
 
-```{r pressure5}
+```{r mouse}
 library(RColorBrewer)
 library(ggplot2)
 library(reshape2)
@@ -254,7 +254,7 @@ head(mouse.dr.exp)
 dim(mouse.dr.exp)
 ```
 
-```{r pressure6}
+```{r caloric}
 library(reshape2)
 colnames(mouse.dr.exp) <- c(rep("Control", 5), rep("Caloric restriction", 5))
 chosen.mouse <- mouse.dr.exp[mouse.genes,]
@@ -274,7 +274,7 @@ plot(gw)
 ```
 
 
-```{r pressure7}
+```{r sessioninfo}
 sessionInfo()
 ```
 
